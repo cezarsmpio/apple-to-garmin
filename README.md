@@ -52,6 +52,7 @@ sequenceDiagram
    | `GARMIN_PASSWORD`       | Garmin Connect account password                       |
    | `GARMIN_STORAGE_PATH`   | Folder where the Garmin session token is cached       |
    | `DENO_KV_PATH`          | Path to the local Deno KV (SQLite) database file      |
+   | `CALLBACK_SECRET`       | Shared secret the Shortcut must send with every request |
 
 2. Run the dev server:
 
@@ -75,15 +76,20 @@ The server listens on port `8080` and only understands one route:
 
 `POST /callback` expects a JSON body with **two newline-delimited strings**
 (not arrays) — this mirrors what Apple's Shortcuts app produces when you
-combine a list of Health samples with a newline separator:
+combine a list of Health samples with a newline separator — plus a shared
+`secret` that must match the server's `CALLBACK_SECRET` env var:
 
 ```json
 {
+  "secret": "<same value as CALLBACK_SECRET>",
   "weights": "70.55\n71.20",
   "dates": "2026-07-18T08:00:00.000Z\n2026-07-19T08:00:00.000Z"
 }
 ```
 
+- `secret` must exactly match the server's `CALLBACK_SECRET` env var, or the
+  request is rejected before any weights are parsed or queued. This keeps
+  random requests from poking the endpoint and enqueueing junk.
 - `weights[i]` corresponds to `dates[i]`.
 - Weight values are truncated to 5 characters and parsed as numbers, then
   sent to Garmin tagged as kilograms — make sure your Shortcut requests the
@@ -97,6 +103,7 @@ Responses:
 | Status | Body                          | When                                  |
 | ------ | ----------------------------- | -------------------------------------- |
 | `200`  | `{ "status": "ok" }`          | Payload accepted and queued            |
+| `401`  | `{ "error": "unauthorized" }` | `secret` missing or doesn't match      |
 | `400`  | `{ "error": "no weights found" }` | `weights` missing or not a string  |
 | `400`  | `{ "error": "no dates found" }`   | `dates` missing or not a string    |
 | `404`  | `{ "error": "not found" }`    | Any route other than `/callback`       |
@@ -119,6 +126,9 @@ in order:
    - Method: `POST`
    - Headers: `Content-Type: application/json`
    - Request Body: JSON, with:
+     - `secret` → the same value you set for `CALLBACK_SECRET` (hardcode it in
+       the Shortcut, or read it from a Shortcuts variable so it isn't shown on
+       screen when the Shortcut runs)
      - `weights` → `Weights Text`
      - `dates` → `Dates Text`
 
@@ -145,6 +155,7 @@ docker run -d \
   -v apple-to-garmin-data:/data \
   -e GARMIN_USERNAME=you@example.com \
   -e GARMIN_PASSWORD=your-password \
+  -e CALLBACK_SECRET=a-long-random-string \
   apple-to-garmin
 ```
 

@@ -100,8 +100,15 @@ export function createQueueListener(
   };
 }
 
+function isSecretValid(provided: unknown, expected: string): boolean {
+  return (
+    typeof provided === "string" && provided.length > 0 && provided === expected
+  );
+}
+
 export function createHandler(
   kv: Pick<Deno.Kv, "enqueue">,
+  secret: string,
 ): (req: Request) => Promise<Response> {
   return async (req: Request) => {
     const url = new URL(req.url);
@@ -111,6 +118,11 @@ export function createHandler(
     }
 
     const body = await req.json();
+
+    if (!isSecretValid(body?.secret, secret)) {
+      return Response.json({ error: "unauthorized" }, { status: 401 });
+    }
+
     const parsed = parseWeighInPayload(body);
 
     if ("error" in parsed) {
@@ -137,6 +149,10 @@ async function main(): Promise<void> {
     );
   }
 
+  if (!Deno.env.get("CALLBACK_SECRET")) {
+    throw new Error("CALLBACK_SECRET must be set before loading the script.");
+  }
+
   const garmin = new GarminConnectSDK({
     storage: new FileTokenStorage(Deno.env.get("GARMIN_STORAGE_PATH")!),
   });
@@ -154,7 +170,10 @@ async function main(): Promise<void> {
 
   kv.listenQueue(createQueueListener(kv, garmin));
 
-  Deno.serve({ port: 8080 }, createHandler(kv));
+  Deno.serve(
+    { port: 8080 },
+    createHandler(kv, Deno.env.get("CALLBACK_SECRET")!),
+  );
 }
 
 if (import.meta.main) {

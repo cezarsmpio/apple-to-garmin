@@ -176,7 +176,7 @@ Deno.test("createHandler returns 404 for unknown routes", async () => {
   const enqueue = spy(() =>
     Promise.resolve({ ok: true as const, versionstamp: "0" }),
   );
-  const handler = createHandler({ enqueue });
+  const handler = createHandler({ enqueue }, "top-secret");
   const request = new Request("http://localhost/unknown", {
     method: "POST",
     body: JSON.stringify({}),
@@ -190,15 +190,65 @@ Deno.test("createHandler returns 404 for unknown routes", async () => {
 });
 
 Deno.test(
+  "createHandler returns 401 when /callback is missing the secret",
+  async () => {
+    const enqueue = spy(() =>
+      Promise.resolve({ ok: true as const, versionstamp: "0" }),
+    );
+    const handler = createHandler({ enqueue }, "top-secret");
+    const request = new Request("http://localhost/callback", {
+      method: "POST",
+      body: JSON.stringify({
+        weights: "70.55",
+        dates: "2026-01-01T00:00:00.000Z",
+      }),
+    });
+
+    const response = await handler(request);
+
+    assertEquals(response.status, 401);
+    assertEquals(await response.json(), { error: "unauthorized" });
+    assertSpyCalls(enqueue, 0);
+  },
+);
+
+Deno.test(
+  "createHandler returns 401 when /callback has the wrong secret",
+  async () => {
+    const enqueue = spy(() =>
+      Promise.resolve({ ok: true as const, versionstamp: "0" }),
+    );
+    const handler = createHandler({ enqueue }, "top-secret");
+    const request = new Request("http://localhost/callback", {
+      method: "POST",
+      body: JSON.stringify({
+        secret: "not-the-secret",
+        weights: "70.55",
+        dates: "2026-01-01T00:00:00.000Z",
+      }),
+    });
+
+    const response = await handler(request);
+
+    assertEquals(response.status, 401);
+    assertEquals(await response.json(), { error: "unauthorized" });
+    assertSpyCalls(enqueue, 0);
+  },
+);
+
+Deno.test(
   "createHandler returns 400 when /callback is missing weights",
   async () => {
     const enqueue = spy(() =>
       Promise.resolve({ ok: true as const, versionstamp: "0" }),
     );
-    const handler = createHandler({ enqueue });
+    const handler = createHandler({ enqueue }, "top-secret");
     const request = new Request("http://localhost/callback", {
       method: "POST",
-      body: JSON.stringify({ dates: "2026-01-01T00:00:00.000Z" }),
+      body: JSON.stringify({
+        secret: "top-secret",
+        dates: "2026-01-01T00:00:00.000Z",
+      }),
     });
 
     const response = await handler(request);
@@ -215,10 +265,10 @@ Deno.test(
     const enqueue = spy(() =>
       Promise.resolve({ ok: true as const, versionstamp: "0" }),
     );
-    const handler = createHandler({ enqueue });
+    const handler = createHandler({ enqueue }, "top-secret");
     const request = new Request("http://localhost/callback", {
       method: "POST",
-      body: JSON.stringify({ weights: "70.5" }),
+      body: JSON.stringify({ secret: "top-secret", weights: "70.5" }),
     });
 
     const response = await handler(request);
@@ -235,10 +285,11 @@ Deno.test(
     const enqueue = spy(() =>
       Promise.resolve({ ok: true as const, versionstamp: "0" }),
     );
-    const handler = createHandler({ enqueue });
+    const handler = createHandler({ enqueue }, "top-secret");
     const request = new Request("http://localhost/callback", {
       method: "POST",
       body: JSON.stringify({
+        secret: "top-secret",
         weights: "70.55",
         dates: "2026-01-01T00:00:00.000Z",
       }),

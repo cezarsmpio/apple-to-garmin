@@ -12,7 +12,7 @@ COPY deno.json deno.lock ./
 COPY main.ts ./
 
 RUN deno compile \
-  --allow-env=DENO_KV_PATH,GARMIN_STORAGE_PATH,GARMIN_USERNAME,GARMIN_PASSWORD \
+  --allow-env=DENO_KV_PATH,GARMIN_STORAGE_PATH,GARMIN_USERNAME,GARMIN_PASSWORD,CALLBACK_SECRET \
   --allow-net \
   --allow-read=/data \
   --allow-write=/data \
