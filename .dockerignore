@@ -1,0 +1,12 @@
+.git
+.env
+.env.example
+.garmin-tokens
+apple-to-garmin.sqlite3
+apple-to-garmin.sqlite3-shm
+apple-to-garmin.sqlite3-wal
+.vscode
+.DS_Store
+main_test.ts
+Dockerfile
+.dockerignore

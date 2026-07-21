@@ -1,0 +1,12 @@
+/.idea/
+/.vscode/
+
+/node_modules
+
+*.DS_Store
+.env
+*.orig
+*.pyc
+*.swp
+*.sqlite3*
+.garmin-tokens
