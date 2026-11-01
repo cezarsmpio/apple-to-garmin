@@ -2,11 +2,9 @@
 .env
 .env.example
 .garmin-tokens
-apple-to-garmin.sqlite3
-apple-to-garmin.sqlite3-shm
-apple-to-garmin.sqlite3-wal
+apple-to-garmin.db*
 .vscode
 .DS_Store
-main_test.ts
+*.test.ts
 Dockerfile
 .dockerignore

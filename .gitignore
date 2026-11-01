@@ -9,4 +9,7 @@
 *.pyc
 *.swp
 *.sqlite3*
+*.db
+*.db-shm
+*.db-wal
 .garmin-tokens
