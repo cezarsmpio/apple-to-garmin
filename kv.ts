@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type { StatementSync } from "node:sqlite";
 import { deserialize, serialize } from "node:v8";
@@ -62,6 +62,19 @@ const INCOMPATIBLE_SCHEMA_MESSAGE =
 function newVersionstamp(): string {
   const time = Date.now().toString(16).padStart(12, "0");
   return time + randomBytes(8).toString("hex");
+}
+
+type WakeSignal = {
+  promise: Promise<void>;
+  resolve: () => void;
+};
+
+function newWakeSignal(): WakeSignal {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
 }
 
 function tableColumns(db: DatabaseSync, table: string): string[] {
@@ -149,13 +162,26 @@ class SqliteAtomicOperation implements AtomicOperation {
 class SqliteKv implements Kv {
   db: DatabaseSync;
   stopped: boolean;
+  options: KvOptions;
+  handler: ((value: unknown) => Promise<void>) | undefined;
   getStatement: StatementSync;
   deleteStatement: StatementSync;
   insertClaim: StatementSync;
+  insertQueueStatement: StatementSync;
+  nextQueueStatement: StatementSync;
+  minNextAttemptStatement: StatementSync;
+  retryQueueStatement: StatementSync;
+  deleteQueueStatement: StatementSync;
+  wakeSignal: WakeSignal;
+  wakeTimer: ReturnType<typeof setTimeout> | undefined;
 
-  constructor(db: DatabaseSync) {
+  constructor(db: DatabaseSync, options: KvOptions = {}) {
     this.db = db;
     this.stopped = false;
+    this.options = options;
+    this.handler = undefined;
+    this.wakeSignal = newWakeSignal();
+    this.wakeTimer = undefined;
     this.getStatement = db.prepare(
       "SELECT value, versionstamp FROM kv WHERE key = ?",
     );
@@ -163,6 +189,19 @@ class SqliteKv implements Kv {
     this.insertClaim = db.prepare(
       "INSERT INTO kv (key, value, versionstamp) VALUES (?, ?, ?) ON CONFLICT(key) DO NOTHING",
     );
+    this.insertQueueStatement = db.prepare(
+      "INSERT INTO queue (value) VALUES (?)",
+    );
+    this.nextQueueStatement = db.prepare(
+      "SELECT id, value, attempts FROM queue WHERE next_attempt_at <= ? ORDER BY id LIMIT 1",
+    );
+    this.minNextAttemptStatement = db.prepare(
+      "SELECT MIN(next_attempt_at) AS next FROM queue",
+    );
+    this.retryQueueStatement = db.prepare(
+      "UPDATE queue SET attempts = ?, next_attempt_at = ? WHERE id = ?",
+    );
+    this.deleteQueueStatement = db.prepare("DELETE FROM queue WHERE id = ?");
   }
 
   async get<T>(key: KvKey): Promise<KvEntry<T>> {
@@ -185,12 +224,18 @@ class SqliteKv implements Kv {
     return new SqliteAtomicOperation(this);
   }
 
-  enqueue(_value: unknown): Promise<{ ok: true; versionstamp: string }> {
-    throw new Error("not implemented");
+  async enqueue(value: unknown): Promise<{ ok: true; versionstamp: string }> {
+    this.insertQueueStatement.run(serialize(value));
+    this.wakeWorker();
+    return { ok: true, versionstamp: randomUUID() };
   }
 
-  listenQueue(_handler: (value: unknown) => Promise<void>): void {
-    throw new Error("not implemented");
+  listenQueue(handler: (value: unknown) => Promise<void>): void {
+    if (this.handler !== undefined) {
+      throw new Error("listenQueue() supports exactly one handler");
+    }
+    this.handler = handler;
+    void this.drain();
   }
 
   close(): void {
@@ -203,13 +248,96 @@ class SqliteKv implements Kv {
   }
 
   wakeWorker(): void {
-    // The queue worker is added in a later task; enqueue() will wake it here.
+    if (this.wakeTimer !== undefined) {
+      clearTimeout(this.wakeTimer);
+      this.wakeTimer = undefined;
+    }
+    const signal = this.wakeSignal;
+    this.wakeSignal = newWakeSignal();
+    signal.resolve();
+  }
+
+  async drain(): Promise<void> {
+    try {
+      while (!this.stopped) {
+        const row = this.nextQueueStatement.get(Date.now());
+        if (row === undefined) {
+          await this.waitForWork();
+          continue;
+        }
+        await this.processQueueRow(
+          Number(row.id),
+          Number(row.attempts),
+          row.value as Uint8Array,
+        );
+      }
+    } catch (error) {
+      if (!this.stopped) {
+        console.error("queue worker stopped unexpectedly", error);
+      }
+    }
+  }
+
+  async waitForWork(): Promise<void> {
+    const wake = this.wakeSignal.promise;
+    const row = this.minNextAttemptStatement.get();
+    const next = row === undefined ? null : row.next;
+    if (next === null || next === undefined) {
+      await wake;
+      return;
+    }
+
+    const delay = Math.max(0, Number(next) - Date.now());
+    const timerDone = new Promise<void>((resolve) => {
+      this.wakeTimer = setTimeout(() => {
+        this.wakeTimer = undefined;
+        resolve();
+      }, delay);
+    });
+    await Promise.race([wake, timerDone]);
+    if (this.wakeTimer !== undefined) {
+      clearTimeout(this.wakeTimer);
+      this.wakeTimer = undefined;
+    }
+  }
+
+  async processQueueRow(
+    id: number,
+    attempts: number,
+    serialized: Uint8Array,
+  ): Promise<void> {
+    const handler = this.handler;
+    if (handler === undefined) {
+      throw new Error("the queue worker requires a handler");
+    }
+
+    try {
+      await handler(deserialize(serialized));
+    } catch (error) {
+      if (this.stopped) {
+        return;
+      }
+      const nextAttempts = attempts + 1;
+      const delay =
+        this.options.retryDelay?.(nextAttempts) ??
+        Math.min(1000 * 2 ** (nextAttempts - 1), 300_000);
+      this.retryQueueStatement.run(nextAttempts, Date.now() + delay, id);
+      console.error(
+        `queue handler failed (attempt ${nextAttempts}); retrying in ${delay}ms`,
+        error,
+      );
+      return;
+    }
+
+    if (!this.stopped) {
+      this.deleteQueueStatement.run(id);
+    }
   }
 }
 
 export async function openKv(
   path: string,
-  _options?: KvOptions,
+  options: KvOptions = {},
 ): Promise<Kv> {
   const db = new DatabaseSync(path);
 
@@ -224,5 +352,5 @@ export async function openKv(
     throw error;
   }
 
-  return new SqliteKv(db);
+  return new SqliteKv(db, options);
 }

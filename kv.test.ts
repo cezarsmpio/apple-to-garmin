@@ -79,3 +79,62 @@ test("openKv refuses a Deno KV schema", async (t) => {
 
   await assert.rejects(() => openKv(path), /Deno KV/);
 });
+
+test("listenQueue delivers enqueued values", async (t) => {
+  const kv = await openKv(":memory:");
+  t.after(() => kv.close());
+
+  let resolve!: (value: unknown) => void;
+  const delivered = new Promise<unknown>((r) => {
+    resolve = r;
+  });
+  kv.listenQueue(async (value) => {
+    resolve(value);
+  });
+
+  const message = { type: "NEW_WEIGHT", payload: { date } };
+  await kv.enqueue(message);
+
+  assert.deepEqual(await delivered, message);
+});
+
+test("listenQueue retries a throwing handler", async (t) => {
+  const kv = await openKv(":memory:", { retryDelay: () => 1 });
+  t.after(() => kv.close());
+
+  let attempts = 0;
+  let markDone!: () => void;
+  const done = new Promise<void>((r) => {
+    markDone = r;
+  });
+  kv.listenQueue(async () => {
+    attempts += 1;
+    if (attempts === 1) throw new Error("transient");
+    markDone();
+  });
+
+  await kv.enqueue("job");
+  await done;
+
+  assert.equal(attempts, 2);
+});
+
+test("queued values survive close and reopen", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "apple-to-garmin-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const path = join(dir, "queue.db");
+
+  const first = await openKv(path);
+  await first.enqueue({ date });
+  first.close();
+
+  const second = await openKv(path);
+  t.after(() => second.close());
+  const delivered = new Promise<unknown>((resolve) => {
+    second.listenQueue(async (value) => {
+      resolve(value);
+    });
+  });
+
+  assert.deepEqual(await delivered, { date });
+});
