@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { AddWeighInInput } from "garmin-connect-sdk";
 import {
   createHandler,
+  createNodeServer,
   createQueueListener,
   parseWeighInPayload,
   recordNewWeights,
@@ -286,4 +287,53 @@ test("createHandler enqueues a NEW_WEIGHT message for a valid /callback body", a
       },
     },
   ]);
+});
+
+test("createNodeServer passes the path and JSON body to the handler", async (t) => {
+  const server = createNodeServer(async (req) =>
+    Response.json({ path: new URL(req.url).pathname, body: await req.json() })
+  );
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  t.after(() => server.close());
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+
+  const response = await fetch(`http://127.0.0.1:${port}/callback`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ weights: "70.5" }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    path: "/callback",
+    body: { weights: "70.5" },
+  });
+});
+
+test("createNodeServer returns 500 for an invalid JSON body", async (t) => {
+  const server = createNodeServer(createHandler({ enqueue: async () => ({ ok: true as const, versionstamp: "0" }) }, "secret"));
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  t.after(() => server.close());
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+
+  const response = await fetch(`http://127.0.0.1:${port}/callback`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "not json",
+  });
+
+  assert.equal(response.status, 500);
+
+  const second = await fetch(`http://127.0.0.1:${port}/callback`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      secret: "secret",
+      weights: "70.5",
+      dates: "2026-01-01T00:00:00.000Z",
+    }),
+  });
+  assert.equal(second.status, 200);
 });

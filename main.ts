@@ -1,4 +1,12 @@
+import { createServer } from "node:http";
+import type { IncomingMessage, Server, ServerResponse } from "node:http";
+import { Readable } from "node:stream";
+import {
+  FileTokenStorage,
+  GarminConnectSDK,
+} from "garmin-connect-sdk";
 import type { AddWeighInInput } from "garmin-connect-sdk";
+import { openKv } from "./kv.ts";
 import type { Kv, KvKey } from "./kv.ts";
 
 export function weightKey(date: Date): KvKey {
@@ -134,4 +142,100 @@ export function createHandler(
 
     return Response.json({ status: "ok" });
   };
+}
+
+export function toRequest(req: IncomingMessage): Request {
+  const url = new URL(
+    req.url ?? "/",
+    "http://" + (req.headers.host ?? "localhost"),
+  );
+
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(req.headers)) {
+    if (value === undefined) {
+      continue;
+    }
+    headers.set(name, Array.isArray(value) ? value.join(", ") : value);
+  }
+
+  const method = req.method ?? "GET";
+  const init: RequestInit = { method, headers };
+
+  if (method !== "GET" && method !== "HEAD") {
+    init.body = Readable.toWeb(req) as ReadableStream;
+    (init as RequestInit & { duplex: "half" }).duplex = "half";
+  }
+
+  return new Request(url, init);
+}
+
+export async function sendResponse(
+  res: ServerResponse,
+  response: Response,
+): Promise<void> {
+  res.writeHead(response.status, Object.fromEntries(response.headers));
+  res.end(Buffer.from(await response.arrayBuffer()));
+}
+
+export function createNodeServer(
+  handler: (req: Request) => Promise<Response>,
+): Server {
+  return createServer(async (req, res) => {
+    try {
+      const response = await handler(toRequest(req));
+      await sendResponse(res, response);
+    } catch (error) {
+      console.error(error);
+      if (!res.headersSent) {
+        res.writeHead(500);
+      }
+      res.end();
+    }
+  });
+}
+
+async function main(): Promise<void> {
+  const databasePath = process.env.DATABASE_PATH;
+  if (!databasePath) {
+    throw new Error("DATABASE_PATH must be set before loading the script.");
+  }
+
+  const storagePath = process.env.GARMIN_STORAGE_PATH;
+  if (!storagePath) {
+    throw new Error(
+      "GARMIN_STORAGE_PATH must be set before loading the script.",
+    );
+  }
+
+  const secret = process.env.CALLBACK_SECRET;
+  if (!secret) {
+    throw new Error("CALLBACK_SECRET must be set before loading the script.");
+  }
+
+  const garmin = new GarminConnectSDK({
+    storage: new FileTokenStorage(storagePath),
+  });
+
+  const restored = await garmin.restoreSession();
+
+  if (!restored) {
+    await garmin.login({
+      email: process.env.GARMIN_USERNAME!,
+      password: process.env.GARMIN_PASSWORD!,
+    });
+  }
+
+  const kv = await openKv(databasePath);
+
+  kv.listenQueue(createQueueListener(kv, garmin));
+
+  const server = createNodeServer(createHandler(kv, secret));
+
+  server.listen(8080, () => {
+    console.log("Listening on http://localhost:8080");
+  });
+}
+
+if (import.meta.main) {
+  await main();
 }
