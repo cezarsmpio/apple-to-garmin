@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: apple-to-garmin
+  namespace: apple-to-garmin
+  labels:
+    app: apple-to-garmin
+spec:
+  type: ClusterIP
+  selector:
+    app: apple-to-garmin
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

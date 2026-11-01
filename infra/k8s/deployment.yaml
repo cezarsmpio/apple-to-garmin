@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apple-to-garmin
+  namespace: apple-to-garmin
+  labels:
+    app: apple-to-garmin
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: apple-to-garmin
+  template:
+    metadata:
+      labels:
+        app: apple-to-garmin
+    spec:
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: apple-to-garmin
+          image: ghcr.io/cezarsmpio/apple-to-garmin:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: GARMIN_STORAGE_PATH
+              value: /data/.garmin-tokens
+            - name: DATABASE_PATH
+              value: /data/apple-to-garmin.db
+            - name: GARMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: apple-to-garmin-secrets
+                  key: GARMIN_USERNAME
+            - name: GARMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: apple-to-garmin-secrets
+                  key: GARMIN_PASSWORD
+            - name: CALLBACK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: apple-to-garmin-secrets
+                  key: CALLBACK_SECRET
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 5m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 192Mi
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      terminationGracePeriodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: apple-to-garmin-data
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi

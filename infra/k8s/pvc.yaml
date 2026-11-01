@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: apple-to-garmin-data
+  namespace: apple-to-garmin
+  labels:
+    app: apple-to-garmin
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 128Mi
