@@ -73,7 +73,11 @@ export async function recordNewWeights(
         `Failed to send weight for ${date.toISOString()} to Garmin, will retry later`,
         error,
       );
-      await kv.delete(key);
+      try {
+        await kv.delete(key);
+      } catch (deleteError) {
+        console.error("Failed to roll back weight claim", deleteError);
+      }
       throw error;
     }
   }
@@ -173,8 +177,9 @@ export async function sendResponse(
   res: ServerResponse,
   response: Response,
 ): Promise<void> {
+  const body = Buffer.from(await response.arrayBuffer());
   res.writeHead(response.status, Object.fromEntries(response.headers));
-  res.end(Buffer.from(await response.arrayBuffer()));
+  res.end(body);
 }
 
 export function createNodeServer(
@@ -185,7 +190,10 @@ export function createNodeServer(
       const response = await handler(toRequest(req));
       await sendResponse(res, response);
     } catch (error) {
-      console.error(error);
+      console.error(
+        "Request failed:",
+        error instanceof Error ? error.name : "unknown error",
+      );
       if (!res.headersSent) {
         res.writeHead(500);
       }
@@ -212,6 +220,8 @@ async function main(): Promise<void> {
     throw new Error("CALLBACK_SECRET must be set before loading the script.");
   }
 
+  const kv = await openKv(databasePath);
+
   const garmin = new GarminConnectSDK({
     storage: new FileTokenStorage(storagePath),
   });
@@ -224,8 +234,6 @@ async function main(): Promise<void> {
       password: process.env.GARMIN_PASSWORD!,
     });
   }
-
-  const kv = await openKv(databasePath);
 
   kv.listenQueue(createQueueListener(kv, garmin));
 

@@ -56,6 +56,21 @@ test("atomic claim rejects a second writer for the same key", async (t) => {
   assert.deepEqual((await kv.get(key)).value, { date, weight: 70.5 });
 });
 
+test("atomic rejects a mismatched check and set key", async (t) => {
+  const kv = await openKv(":memory:");
+  t.after(() => kv.close());
+
+  await assert.rejects(
+    () =>
+      kv
+        .atomic()
+        .check({ key, versionstamp: null })
+        .set(["other", "2026-01-01T00:00:00.000Z"], 1)
+        .commit(),
+    /same key/,
+  );
+});
+
 test("delete removes a stored key", async (t) => {
   const kv = await openKv(":memory:");
   t.after(() => kv.close());
@@ -99,6 +114,7 @@ test("listenQueue delivers enqueued values", async (t) => {
 });
 
 test("listenQueue retries a throwing handler", async (t) => {
+  t.mock.method(console, "error", () => {});
   const kv = await openKv(":memory:", { retryDelay: () => 1 });
   t.after(() => kv.close());
 

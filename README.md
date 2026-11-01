@@ -76,7 +76,8 @@ sequenceDiagram
    ```
 
 The new database starts empty, so the first batch may re-send dates already
-sent by the Deno version.
+sent by the Deno version. The Deno version's `DENO_KV_PATH` setting is now
+`DATABASE_PATH`.
 
 The server listens on port `8080` and only understands one route:
 `POST /callback`.
@@ -116,6 +117,18 @@ Responses:
 | `400`  | `{ "error": "no weights found" }` | `weights` missing or not a string  |
 | `400`  | `{ "error": "no dates found" }`   | `dates` missing or not a string    |
 | `404`  | `{ "error": "not found" }`    | Any route other than `/callback`       |
+| `500`  | (empty body)                  | Malformed JSON or an unexpected error  |
+
+## Retries and failure modes
+
+A failed Garmin write is retried indefinitely with exponential backoff capped
+at 5 minutes. The queue retries the whole Shortcut batch, so a single sample
+that Garmin permanently rejects holds up the rest of that batch until the bad
+sample is fixed.
+
+Delivery is at-most-once across crashes. The date is claimed in SQLite before
+Garmin is asked to accept it, so if the process crashes after the claim but
+before Garmin acknowledges the write, that date is never sent.
 
 ## iOS Shortcut tutorial
 

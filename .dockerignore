@@ -5,6 +5,9 @@
 apple-to-garmin.db*
 .vscode
 .DS_Store
+node_modules
+.superpowers
+docs
 *.test.ts
 Dockerfile
 .dockerignore

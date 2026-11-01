@@ -1,5 +1,8 @@
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import type { AddWeighInInput } from "garmin-connect-sdk";
 import {
   createHandler,
@@ -92,6 +95,7 @@ test("recordNewWeights sends each distinct date independently", async (t) => {
 });
 
 test("recordNewWeights rolls back the KV claim when Garmin rejects the write, allowing a retry", async (t) => {
+  t.mock.method(console, "error", () => {});
   const kv = await openKv(":memory:");
   t.after(() => kv.close());
   let callCount = 0;
@@ -312,6 +316,7 @@ test("createNodeServer passes the path and JSON body to the handler", async (t) 
 });
 
 test("createNodeServer returns 500 for an invalid JSON body", async (t) => {
+  t.mock.method(console, "error", () => {});
   const server = createNodeServer(createHandler({ enqueue: async () => ({ ok: true as const, versionstamp: "0" }) }, "secret"));
   await new Promise<void>((resolve) => server.listen(0, resolve));
   t.after(() => server.close());
@@ -336,4 +341,71 @@ test("createNodeServer returns 500 for an invalid JSON body", async (t) => {
     }),
   });
   assert.equal(second.status, 200);
+});
+
+test("a queue-triggered retry sends the weight after a transient Garmin failure", async (t) => {
+  t.mock.method(console, "error", () => {});
+  const kv = await openKv(":memory:", { retryDelay: () => 1 });
+  t.after(() => kv.close());
+  let markDone!: () => void;
+  const done = new Promise<void>((resolve) => {
+    markDone = resolve;
+  });
+  let calls = 0;
+  const addWeighIn = mock.fn(async (_entry: AddWeighInInput) => {
+    calls++;
+    if (calls === 1) {
+      throw new Error("Garmin is down");
+    }
+    markDone();
+  });
+  const garmin = { weight: { addWeighIn } };
+  const date = new Date("2026-01-01T00:00:00.000Z");
+
+  kv.listenQueue(createQueueListener(kv, garmin));
+  await kv.enqueue({
+    type: "NEW_WEIGHT",
+    payload: { weights: [70.5], dates: [date] },
+  });
+  await done;
+
+  assert.equal(addWeighIn.mock.callCount(), 2);
+  assert.deepEqual((await kv.get(weightKey(date))).value, {
+    date,
+    weight: 70.5,
+  });
+});
+
+test("a claimed weight survives close and reopen", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "apple-to-garmin-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const databasePath = join(dir, "weights.db");
+  const date = new Date("2026-01-01T00:00:00.000Z");
+
+  const first = await openKv(databasePath);
+  const firstAddWeighIn = mock.fn(async (_entry: AddWeighInInput) => {});
+  await recordNewWeights(
+    first,
+    { weight: { addWeighIn: firstAddWeighIn } },
+    [70.5],
+    [date],
+  );
+  assert.equal(firstAddWeighIn.mock.callCount(), 1);
+  first.close();
+
+  const second = await openKv(databasePath);
+  t.after(() => second.close());
+  const secondAddWeighIn = mock.fn(async (_entry: AddWeighInInput) => {});
+  await recordNewWeights(
+    second,
+    { weight: { addWeighIn: secondAddWeighIn } },
+    [70.5],
+    [date],
+  );
+
+  assert.equal(secondAddWeighIn.mock.callCount(), 0);
+  assert.deepEqual((await second.get(weightKey(date))).value, {
+    date,
+    weight: 70.5,
+  });
 });

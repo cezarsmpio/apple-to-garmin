@@ -144,6 +144,9 @@ class SqliteAtomicOperation implements AtomicOperation {
     if (set === undefined) {
       throw new Error("atomic().commit() requires exactly one set()");
     }
+    if (JSON.stringify(check.key) !== JSON.stringify(set.key)) {
+      throw new Error("atomic().check() and set() must use the same key");
+    }
 
     const versionstamp = newVersionstamp();
     const result = this.kv.insertClaim.run(
@@ -318,9 +321,11 @@ class SqliteKv implements Kv {
         return;
       }
       const nextAttempts = attempts + 1;
-      const delay =
+      const delay = Math.max(
+        1,
         this.options.retryDelay?.(nextAttempts) ??
-        Math.min(1000 * 2 ** (nextAttempts - 1), 300_000);
+          Math.min(1000 * 2 ** (nextAttempts - 1), 300_000),
+      );
       this.retryQueueStatement.run(nextAttempts, Date.now() + delay, id);
       console.error(
         `queue handler failed (attempt ${nextAttempts}); retrying in ${delay}ms`,
@@ -342,11 +347,12 @@ export async function openKv(
   const db = new DatabaseSync(path);
 
   try {
-    if (path !== ":memory:") {
-      db.exec("PRAGMA journal_mode = WAL");
-      db.exec("PRAGMA busy_timeout = 5000");
-    }
     ensureSchema(db);
+
+    if (path !== ":memory:") {
+      db.exec("PRAGMA busy_timeout = 5000");
+      db.exec("PRAGMA journal_mode = WAL");
+    }
   } catch (error) {
     db.close();
     throw error;
