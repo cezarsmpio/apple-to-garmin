@@ -39,6 +39,7 @@
 - Create: `tsconfig.json`
 - Create: `kv.ts`
 - Create: `kv.test.ts`
+- Delete: `main_test.ts`
 
 **Interfaces:**
 - Consumes: nothing.
@@ -89,7 +90,7 @@
     "verbatimModuleSyntax": true,
     "types": ["node"]
   },
-  "include": ["*.ts"]
+  "include": ["kv.ts", "kv.test.ts"]
 }
 ```
 
@@ -97,6 +98,14 @@
 
 Run: `npm install`
 Expected: `package-lock.json` and `node_modules/` created; no errors.
+
+Then remove the Deno-only test file so `node --test` and `tsc` only see ported code:
+
+```bash
+git rm main_test.ts
+```
+
+`main.test.ts` replaces it in Task 3; the old file remains in git history.
 
 - [ ] **Step 4: Write the failing KV core tests in `kv.test.ts`**
 
@@ -216,7 +225,7 @@ Expected: exit 0, no errors.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add package.json package-lock.json tsconfig.json kv.ts kv.test.ts docs/superpowers/specs/2026-11-01-deno-to-node-design.md docs/superpowers/plans/2026-11-01-deno-to-node.md
+git add package.json package-lock.json tsconfig.json kv.ts kv.test.ts main_test.ts docs/superpowers/specs/2026-11-01-deno-to-node-design.md docs/superpowers/plans/2026-11-01-deno-to-node.md
 git commit -m "feat: add SQLite-backed KV store and Node project scaffolding"
 ```
 
@@ -334,7 +343,6 @@ git commit -m "feat: add durable SQLite queue with retry backoff"
 **Files:**
 - Modify: `main.ts`
 - Create: `main.test.ts`
-- Delete: `main_test.ts`
 
 **Interfaces:**
 - Consumes: `Kv`, `KvKey`, `openKv` from Tasks 1–2; `AddWeighInInput` from `garmin-connect-sdk`.
@@ -415,7 +423,7 @@ Expected: FAIL — `main.ts` still uses `Deno.*` and its exports do not type/run
 - `recordNewWeights(kv: Pick<Kv, "atomic" | "delete">, ...)` keeps the claim/rollback flow, and in the catch block logs, `await kv.delete(key)`, then `throw error` instead of returning.
 - `createQueueListener` and `createHandler` keep their current bodies and only change types.
 - Do not add `main()`, `node:http`, or `import.meta.main` yet.
-- Delete `main_test.ts`; `main.test.ts` replaces it. Run `git rm main_test.ts` in the commit step.
+- Change `tsconfig.json` `include` to `["*.ts"]` now that every remaining source file is Node-ready.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -428,8 +436,7 @@ Run: `npm run typecheck`
 Expected: exit 0.
 
 ```bash
-git add main.ts main.test.ts
-git rm main_test.ts
+git add main.ts main.test.ts tsconfig.json
 git commit -m "feat: port application logic and tests to Node"
 ```
 

@@ -10,5 +10,5 @@
     "verbatimModuleSyntax": true,
     "types": ["node"]
   },
-  "include": ["*.ts"]
+  "include": ["kv.ts", "kv.test.ts"]
 }
