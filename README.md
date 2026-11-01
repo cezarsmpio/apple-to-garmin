@@ -1,12 +1,12 @@
 # Apple to Garmin
 
-A tiny Deno HTTP server that receives Apple Health weight samples from an iOS
-Shortcut and forwards them to Garmin Connect, so your scale data ends up in
+A tiny Node.js HTTP server that receives Apple Health weight samples from an
+iOS Shortcut and forwards them to Garmin Connect, so your scale data ends up in
 both places without manual re-entry.
 
-It's built to be safe to re-run: every weigh-in is keyed by its date in
-[Deno KV](https://docs.deno.com/deploy/kv/), so the same sample is never sent
-to Garmin twice, even if the Shortcut (or Deno's queue) retries.
+It's built to be safe to re-run: every weigh-in is keyed by its date in SQLite,
+so the same sample is never sent to Garmin twice, even if the Shortcut (or the
+queue) retries.
 
 ## How it works
 
@@ -14,7 +14,7 @@ to Garmin twice, even if the Shortcut (or Deno's queue) retries.
 sequenceDiagram
     participant Shortcut as iOS Shortcut
     participant Server as apple-to-garmin
-    participant KV as Deno KV
+    participant KV as SQLite
     participant Garmin as Garmin Connect
 
     Shortcut->>Server: POST /callback (weights + dates)
@@ -33,14 +33,20 @@ sequenceDiagram
 
 ## Requirements
 
-- [Deno](https://deno.com/) 2.x
+- [Node.js](https://nodejs.org/) 26+
 - A Garmin Connect account
-- (optional) [Docker](https://www.docker.com/), if you'd rather run a
-  compiled binary in a container
+- (optional) [Docker](https://www.docker.com/), if you'd rather run the
+  service in a container
 
 ## Setup
 
-1. Copy the example env file and fill in your Garmin credentials:
+1. Install dependencies:
+
+   ```sh
+   npm install
+   ```
+
+2. Copy the example env file and fill in your Garmin credentials:
 
    ```sh
    cp .env.example .env
@@ -51,23 +57,26 @@ sequenceDiagram
    | `GARMIN_USERNAME`       | Garmin Connect account email                          |
    | `GARMIN_PASSWORD`       | Garmin Connect account password                       |
    | `GARMIN_STORAGE_PATH`   | Folder where the Garmin session token is cached       |
-   | `DENO_KV_PATH`          | Path to the local Deno KV (SQLite) database file      |
+   | `DATABASE_PATH`         | Path to the local SQLite database file                |
    | `CALLBACK_SECRET`       | Shared secret the Shortcut must send with every request |
 
-2. Run the dev server:
+3. Run the dev server:
 
    ```sh
-   deno task dev
+   npm run dev
    ```
 
    The first run logs into Garmin with your credentials and caches a session
    token under `GARMIN_STORAGE_PATH`; subsequent runs reuse that session.
 
-3. Run the tests:
+4. Run the tests:
 
    ```sh
-   deno task test
+   npm test
    ```
+
+The new database starts empty, so the first batch may re-send dates already
+sent by the Deno version.
 
 The server listens on port `8080` and only understands one route:
 `POST /callback`.
@@ -138,8 +147,7 @@ data updates" or a daily time trigger) to sync automatically.
 
 ## Docker
 
-Build a self-contained image (the `Dockerfile` uses `deno compile` to produce
-a single binary, so the runtime image doesn't need the Deno CLI at all):
+Build the image (no compile step — it runs `node main.ts` on `node:26`):
 
 ```sh
 docker build -t apple-to-garmin .
@@ -159,15 +167,18 @@ docker run -d \
   apple-to-garmin
 ```
 
-`GARMIN_STORAGE_PATH` and `DENO_KV_PATH` are already set inside the image to
+`GARMIN_STORAGE_PATH` and `DATABASE_PATH` are already set inside the image to
 point at `/data`; only credentials need to be passed at `docker run` time.
 
-## Permissions
+The image runs as the non-root `node` user.
 
-Both the `deno task dev` and the Docker image use scoped permissions instead
-of `--allow-all`: only the specific env vars the app reads, network access
-(required for the Garmin Connect API), and read/write access to the token
-storage folder and the KV database file.
+## Runtime
+
+Node.js has no scoped-permission flags like Deno's `--allow-read`/`--allow-net`,
+so there is nothing to declare in the app itself. Instead, `npm run dev` runs
+with your own user's access, while the Docker image runs as the non-root `node`
+user and only needs network access (for the Garmin Connect API) plus read/write
+access to `/data`, where the session token and SQLite database live.
 
 ## License
 
