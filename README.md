@@ -174,11 +174,12 @@ The image runs as the non-root `node` user.
 
 ## Runtime
 
-Node.js has no scoped-permission flags like Deno's `--allow-read`/`--allow-net`,
-so there is nothing to declare in the app itself. Instead, `npm run dev` runs
-with your own user's access, while the Docker image runs as the non-root `node`
-user and only needs network access (for the Garmin Connect API) plus read/write
-access to `/data`, where the session token and SQLite database live.
+This project does not enable Node's optional Permission Model (`--permission`),
+so there are no scoped allow-lists to declare in the app itself. Instead,
+`npm run dev` runs with your own user's access, while the Docker image runs as
+the non-root `node` user and only needs network access (for the Garmin Connect
+API) plus read/write access to `/data`, where the session token and SQLite
+database live.
 
 ## License
 

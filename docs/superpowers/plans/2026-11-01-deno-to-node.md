@@ -648,7 +648,7 @@ git commit -m "build: run the service on node:26 in Docker"
 - Setup: `npm install`, `cp .env.example .env`, table row `DATABASE_PATH` → "Path to the local SQLite database file", `npm run dev`, `npm test`.
 - Add a short note: the new database starts empty, so the first batch may re-send dates already sent by the Deno version.
 - Docker: no compile step; the image runs `node main.ts`; env note uses `DATABASE_PATH`.
-- Replace the Deno permissions section with "Runtime": Node has no scoped-permission flags; the container runs as the non-root `node` user and only needs network access plus read/write on `/data`.
+- Replace the Deno permissions section with "Runtime": this project does not enable Node's optional Permission Model (`--permission`); `npm run dev` runs with your own user's access, while the container runs as the non-root `node` user and only needs network access plus read/write on `/data`.
 
 - [ ] **Step 2: Delete the Deno project files**
 
@@ -658,7 +658,7 @@ git rm deno.json deno.lock
 
 - [ ] **Step 3: Verify no Deno APIs or tooling remain**
 
-Run: `grep -rnE "Deno\.|deno (task|run|test|compile)|deno\.json|deno\.lock|jsr:|@std/" --include="*.ts" --include="*.json" --include="Dockerfile" --include="*.md" --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=docs .`
+Run: `rg -n -e 'Deno\.' -e 'deno (task|run|test|compile)' -e 'deno\.json' -e 'deno\.lock' -e 'jsr:' -e '@std/' --glob '!node_modules/**' --glob '!.git/**' --glob '!docs/**' .`
 Expected: no matches. (`docs/` keeps the historical design/plan references.)
 
 - [ ] **Step 4: Run the full verification**
