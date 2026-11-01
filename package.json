@@ -1,0 +1,20 @@
+{
+  "name": "apple-to-garmin",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=26" },
+  "scripts": {
+    "dev": "node --watch --env-file=.env main.ts",
+    "start": "node main.ts",
+    "test": "node --test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "garmin-connect-sdk": "1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}
