@@ -1,10 +1,7 @@
-import {
-  AddWeighInInput,
-  FileTokenStorage,
-  GarminConnectSDK,
-} from "garmin-connect-sdk";
+import type { AddWeighInInput } from "garmin-connect-sdk";
+import type { Kv, KvKey } from "./kv.ts";
 
-export function weightKey(date: Date): Deno.KvKey {
+export function weightKey(date: Date): KvKey {
   return ["weights", date.toISOString()];
 }
 
@@ -37,7 +34,7 @@ interface WeighInWriter {
 }
 
 export async function recordNewWeights(
-  kv: Pick<Deno.Kv, "atomic" | "delete">,
+  kv: Pick<Kv, "atomic" | "delete">,
   garmin: WeighInWriter,
   weights: number[],
   dates: Date[],
@@ -69,6 +66,7 @@ export async function recordNewWeights(
         error,
       );
       await kv.delete(key);
+      throw error;
     }
   }
 }
@@ -87,7 +85,7 @@ function isNewWeightMessage(value: unknown): value is NewWeightMessage {
 }
 
 export function createQueueListener(
-  kv: Pick<Deno.Kv, "atomic" | "delete">,
+  kv: Pick<Kv, "atomic" | "delete">,
   garmin: WeighInWriter,
 ): (value: unknown) => Promise<void> {
   return async (value: unknown) => {
@@ -107,7 +105,7 @@ function isSecretValid(provided: unknown, expected: string): boolean {
 }
 
 export function createHandler(
-  kv: Pick<Deno.Kv, "enqueue">,
+  kv: Pick<Kv, "enqueue">,
   secret: string,
 ): (req: Request) => Promise<Response> {
   return async (req: Request) => {
@@ -136,46 +134,4 @@ export function createHandler(
 
     return Response.json({ status: "ok" });
   };
-}
-
-async function main(): Promise<void> {
-  if (!Deno.env.get("DENO_KV_PATH")) {
-    throw new Error("DENO_KV_PATH must be set before loading the script.");
-  }
-
-  if (!Deno.env.get("GARMIN_STORAGE_PATH")) {
-    throw new Error(
-      "GARMIN_STORAGE_PATH must be set before loading the script.",
-    );
-  }
-
-  if (!Deno.env.get("CALLBACK_SECRET")) {
-    throw new Error("CALLBACK_SECRET must be set before loading the script.");
-  }
-
-  const garmin = new GarminConnectSDK({
-    storage: new FileTokenStorage(Deno.env.get("GARMIN_STORAGE_PATH")!),
-  });
-
-  const restored = await garmin.restoreSession();
-
-  if (!restored) {
-    await garmin.login({
-      email: Deno.env.get("GARMIN_USERNAME")!,
-      password: Deno.env.get("GARMIN_PASSWORD")!,
-    });
-  }
-
-  const kv = await Deno.openKv(Deno.env.get("DENO_KV_PATH"));
-
-  kv.listenQueue(createQueueListener(kv, garmin));
-
-  Deno.serve(
-    { port: 8080 },
-    createHandler(kv, Deno.env.get("CALLBACK_SECRET")!),
-  );
-}
-
-if (import.meta.main) {
-  await main();
 }
