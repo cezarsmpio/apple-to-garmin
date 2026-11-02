@@ -5,6 +5,8 @@ metadata:
   namespace: apple-to-garmin
   labels:
     app: apple-to-garmin
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
 spec:
   accessModes:
     - ReadWriteOnce
