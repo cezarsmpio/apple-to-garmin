@@ -30,7 +30,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: apple-to-garmin
-          image: ghcr.io/cezarsmpio/apple-to-garmin:latest
+          image: ghcr.io/cezarsmpio/apple-to-garmin:sha-1253632608c9db7c8ec50bbbe40acbbde2d2b7c7-1
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
